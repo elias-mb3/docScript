@@ -1,0 +1,17 @@
+{
+  "name": "docscript",
+  "version": "1.0.0",
+  "main": "index.mjs",
+  "type": "module",
+  "scripts": {
+    "setup": "gcloud config set project alestai-internal-alest && gcloud auth login && gcloud auth application-default login"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google/generative-ai": "^0.13.0",
+    "inquirer": "^9.2.23"
+  }
+}

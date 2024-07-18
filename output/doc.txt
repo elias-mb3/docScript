@@ -1,0 +1,345 @@
+
+package.json
+src/
+|-app.mjs
+|/controllers/
+||-UserController.mjs
+
+|/models/
+
+|-routes.mjs
+|/services/
+||-UserManager.mjs
+||-firebaseConfig.mjs
+
+|/test/
+
+|/utils/
+||-CustomError.js
+
+
+=== package.json ===
+{
+  "name": "database",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/app.mjs",
+  "scripts": {
+    "deploy": "gcloud functions deploy admDatabese --gen2 --region=us-central1 --runtime=nodejs20 --trigger-http --max-instances 1 --source=./ --entry-point=Database --memory=256MB --timeout=60s",
+    "cloud": "npx nodemon --exec npx functions-framework --target=main",
+    "setup": "gcloud config set project alestai-internal-alest && gcloud auth login && gcloud auth application-default login",
+    "dev": "nodemon src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.4.0",
+    "axios": "^1.7.2",
+    "express": "^4.19.2",
+    "firebase": "^10.12.2",
+    "firebase-admin": "^12.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
+
+
+=== src/app.mjs ===
+// ./Database/src/app.mjs
+import express from "express";
+import routes from "./routes.mjs"; // Importa as rotas do arquivo routes.mjs
+import { Router } from "express";
+
+class Database {
+  constructor() {
+    this.app = express();
+    this.setupMiddleware();
+    this.setupRoutes();
+  }
+
+  setupMiddleware() {
+    this.app.use(express.json());
+  }
+
+  setupRoutes() {
+    const router = Router();
+    this.app.use(routes);
+  }
+
+  handleRequest(req, res) {
+    this.app(req, res);
+  }
+
+  static async run(req, res) {
+    const database = new Database();
+    database.handleRequest(req, res);
+  }
+}
+
+export const main = Database.run;
+
+
+=== src/controllers/UserController.mjs ===
+// ./Database/src/controllers/UserController.mjs
+import UserManager from "../services/UserManager.mjs";
+
+const userManager = new UserManager();
+
+class UserController {
+  async createUser(req, res) {
+    try {
+      const userData = req.body;
+      const result = await userManager.createUser(userData);
+      res.status(result.statusCode).json(result.body);
+    } catch (error) {
+      console.error("Error creating user:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  }
+
+  async getUserByEmail(req, res, email) {
+    try {
+      console.log(email);
+      const result = await userManager.getUserByEmail(email);
+      res.status(result.statusCode).json(result.body);
+    } catch (error) {
+      console.error("Error getting user by email:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  }
+
+  async updateUser(req, res, email) {
+    try {
+      const newData = req.body;
+      const result = await userManager.updateUser(email, newData);
+      res.status(result.statusCode).json(result.body);
+    } catch (error) {
+      console.error("Error updating user:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  }
+
+  async deleteUser(req, res, email) {
+    try {
+      const result = await userManager.deleteUser(email);
+      res.status(result.statusCode).json(result.body);
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  }
+}
+
+export default UserController;
+
+
+=== src/routes.mjs ===
+// ./Database/src/routes.mjs
+import express from "express";
+import UserController from "./controllers/UserController.mjs";
+
+const router = express.Router();
+const userController = new UserController();
+
+// Rota para criar usuário
+router.post("/user", (req, res) => {
+  userController.createUser(req, res);
+});
+
+// Rota para buscar usuário por email
+router.get("/user", (req, res) => {
+  const { email } = req.query;
+  userController.getUserByEmail(req, res, email);
+});
+
+// Rota para atualizar usuário
+router.put("/user", (req, res) => {
+  const { email } = req.query;
+  userController.updateUser(req, res, email);
+});
+
+// Rota para deletar usuário
+router.delete("/user", (req, res) => {
+  const { email } = req.query;
+  userController.deleteUser(req, res, email);
+});
+
+export default router;
+
+
+=== src/services/UserManager.mjs ===
+// ./Database/src/UserManager.mjs
+import db from "./firebaseConfig.mjs";
+
+const collectionName = "alest-ai-users";
+
+class UserManager {
+  async createUser(data) {
+    try {
+      const email = data.email;
+      const userDocRef = db.collection(collectionName).doc(email);
+      const userDoc = await userDocRef.get();
+
+      if (userDoc.exists) {
+        return {
+          statusCode: 409,
+          body: {
+            message: "User with this email already exists.",
+          },
+        };
+      }
+
+      await userDocRef.set(data);
+
+      return {
+        statusCode: 201,
+        body: {
+          message: "User added successfully.",
+          id: userDocRef.id,
+        },
+      };
+    } catch (error) {
+      console.error("Error adding document:", error);
+      return {
+        statusCode: 500,
+        body: {
+          message: "Internal error adding document.",
+        },
+      };
+    }
+  }
+
+  async getUserByEmail(email) {
+    try {
+      const userDocRef = db.collection(collectionName).doc(email);
+      const userDoc = await userDocRef.get();
+
+      if (!userDoc.exists) {
+        return {
+          statusCode: 404,
+          body: {
+            message: "User not found.",
+          },
+        };
+      }
+
+      return {
+        statusCode: 200,
+        body: userDoc.data(),
+      };
+    } catch (error) {
+      console.error("Error retrieving document:", error);
+      return {
+        statusCode: 500,
+        body: {
+          message: "Internal error retrieving document.",
+        },
+      };
+    }
+  }
+
+  async updateUser(email, newData) {
+    try {
+      const userDocRef = db.collection(collectionName).doc(email);
+      const userDoc = await userDocRef.get();
+
+      if (!userDoc.exists) {
+        return {
+          statusCode: 404,
+          body: {
+            message: "User not found.",
+          },
+        };
+      }
+
+      await userDocRef.update(newData);
+
+      return {
+        statusCode: 200,
+        body: {
+          message: "User updated successfully.",
+          id: userDocRef.id,
+        },
+      };
+    } catch (error) {
+      console.error("Error updating document:", error);
+      return {
+        statusCode: 500,
+        body: {
+          message: "Internal error updating document.",
+        },
+      };
+    }
+  }
+
+  async deleteUser(email) {
+    try {
+      const userDocRef = db.collection(collectionName).doc(email);
+      const userDoc = await userDocRef.get();
+
+      if (!userDoc.exists) {
+        return {
+          statusCode: 404,
+          body: {
+            message: "User not found.",
+          },
+        };
+      }
+
+      await userDocRef.delete();
+
+      return {
+        statusCode: 200,
+        body: {
+          message: "User deleted successfully.",
+        },
+      };
+    } catch (error) {
+      console.error("Error deleting document:", error);
+      return {
+        statusCode: 500,
+        body: {
+          message: "Internal error deleting document.",
+        },
+      };
+    }
+  }
+}
+
+export default UserManager;
+
+
+=== src/services/firebaseConfig.mjs ===
+// ./Database/src/firebaseConfig.mjs
+import admin from "firebase-admin";
+
+const firebaseConfig = {
+  projectId: "alestai-internal-alest",
+};
+
+admin.initializeApp({
+  credential: admin.credential.applicationDefault(),
+  databaseURL: `https://${firebaseConfig.projectId}.firebaseio.com`,
+});
+
+const db = admin.firestore();
+const settings = { databaseId: "sumarify" };
+db.settings(settings);
+
+export default db;
+
+
+=== src/utils/CustomError.js ===
+class CustomError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+    this.body = { message };
+  }
+}
+
+export default CustomError;
+
